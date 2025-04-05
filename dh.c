@@ -153,12 +153,15 @@ int dhGen(mpz_t sk, mpz_t pk)
 	return 0;
 }
 
-int dhGenk(dhKey* k)
-{
-	assert(k);
-	initKey(k);
-	return dhGen(k->SK,k->PK);
-}
+
+// initKey not recognized? Commented out since not used
+
+// int dhGenk(dhKey* k)
+// {
+// 	assert(k);
+// 	initKey(k);
+// 	return dhGen(k->SK,k->PK);
+// }
 
 /* see "Cryptographic Extraction and Key Derivation: The HKDF Scheme"
  * by H. Krawczyk, 2010 for details on the key derivation used here. */

@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include "../util.h"
+
 
 typedef enum { SERVER, CLIENT } Role;
 static const char* role_str[] = { "server", "client" };
@@ -103,13 +105,16 @@ int sign_dh_key_with_rsa(EVP_PKEY *rsa_private_key, unsigned char *dh_key, size_
 
 int main() {
     init("../params");
-    mpz_t sk_mine;
-    mpz_t pk_mine;
-    dhGen(sk_mine, pk_mine);
 
-    mpz_t sk_yours;
-    mpz_t pk_yours;
+    mpz_t sk_mine, pk_mine, sk_yours, pk_yours;
+    mpz_init(sk_mine);
+    mpz_init(pk_mine);
+    mpz_init(sk_yours);
+    mpz_init(pk_yours);
+
+    dhGen(sk_mine, pk_mine);
     dhGen(sk_yours, pk_yours);
+
 
     size_t buflen = 128;
     unsigned char keybuf[buflen];
@@ -128,7 +133,11 @@ int main() {
         printf("%02x", hmac[i]);
     }
     printf("\n");
-    
+
+    // RSA verification 
+    int is_valid = verify_hmac(keybuf, buflen, message, strlen((const char*)message), hmac, hmac_len);
+    printf("HMAC verification result: %s\n", is_valid ? "valid" : "invalid");
+
     // Open the private key (read private key instead of public)
     FILE *private_key_file = fopen("keys/server/private.pem", "rb");
     if (!private_key_file) {
@@ -143,9 +152,10 @@ int main() {
         return -1;
     }
 
-    size_t sig_len = EVP_PKEY_size(private_key);  // Get the size of the signature
-    unsigned char *signature = OPENSSL_malloc(sig_len);  // Dynamically allocate memory for signature
-
+    // size_t sig_len = EVP_PKEY_size(private_key);  // Get the size of the signature
+    //unsigned char *signature = OPENSSL_malloc(sig_len);  // Dynamically allocate memory for signature
+    unsigned char *signature = NULL;
+    size_t sig_len = 0;
     // Sign the DH key (assuming pk_yours is your DH public key)
     sign_dh_key_with_rsa(private_key, keybuf, buflen, &signature, &sig_len);
 

@@ -36,4 +36,10 @@ void xwrite(int fd, const void *buf, size_t nBytes);
 // generates message fingerprint 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	const unsigned char* msg, int msg_length,
-	unsigned int* hmac_length)
+	unsigned int* hmac_length);
+
+// takes original message and regenerates HMAC using shared key
+// checks against HMAC received and determines validity
+int verify_hmac(const unsigned char* key, int key_length,
+	const unsigned char* msg, int msg_length,
+	const unsigned char* expected_hmac, int hmac_length);

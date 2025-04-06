@@ -8,7 +8,14 @@
 #include <gmp.h>
 #include "dh.h"
 #include <string.h>
+#ifdef __APPLE__
+#include <libkern/OSByteOrder.h>
+#define htole32(x) OSSwapHostToLittleInt32(x)
+#define le32toh(x) OSSwapLittleToHostInt32(x)
+#define htobe64(x) OSSwapHostToBigInt64(x)
+#else
 #include <endian.h>
+#endif
 #include <assert.h>
 #include "util.h"
 

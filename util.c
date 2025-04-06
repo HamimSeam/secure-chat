@@ -5,7 +5,14 @@
 #include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
+#ifdef __APPLE__
+#include <libkern/OSByteOrder.h>
+#define htole32(x) OSSwapHostToLittleInt32(x)
+#define le32toh(x) OSSwapLittleToHostInt32(x)
+#define htobe64(x) OSSwapHostToBigInt64(x)
+#else
 #include <endian.h>
+#endif
 #include <string.h>
 #include <openssl/hmac.h>
 
@@ -87,4 +94,28 @@ unsigned char* generate_hmac(const unsigned char* key, int key_length,
 					key, key_length,		// shared secret key
 					msg, msg_length,		// message to hash
 					NULL, hmac_length);		// buffer length
+	}
+
+int verify_hmac(const unsigned char* key, int key_length,
+	const unsigned char* msg, int msg_length,
+	const unsigned char* expected_hmac, int hmac_length) {
+		
+		unsigned int actual_length;
+		unsigned char* actual_hmac = generate_hmac(key, key_length, msg, msg_length, &actual_length);
+
+		if (!actual_hmac) {
+			printf("generate_hmac() returned NULL!\n");
+			return -1;
+		}
+		// length check
+		if (actual_length != hmac_length) {
+			return 0; // invalid because of length mismatch
+		}
+		// compare HMACs using constant time comparison
+		if (memcmp(actual_hmac, expected_hmac, hmac_length) == 0) {
+			return 1; // match 
+		} else {
+			return 0; // mismatch 
+		}
+		
 	}

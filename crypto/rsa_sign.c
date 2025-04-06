@@ -117,6 +117,18 @@ int main() {
     dhFinal(sk_mine, pk_mine, pk_yours, keybuf, buflen);
     printf("Successfully generated DH keys.\n");
 
+    // HMAC test code
+    const unsigned char* message = (const unsigned char*)"hello world!";
+    unsigned int hmac_len;
+
+    unsigned char* hmac = generate_hmac(keybuf, buflen, message, strlen((const char*)message), &hmac_len);
+    printf("Generated HMAC for message \"%s\":\n", message);
+
+    for (unsigned int i = 0; i < hmac_len; i++) {
+        printf("%02x", hmac[i]);
+    }
+    printf("\n");
+    
     // Open the private key (read private key instead of public)
     FILE *private_key_file = fopen("keys/server/private.pem", "rb");
     if (!private_key_file) {

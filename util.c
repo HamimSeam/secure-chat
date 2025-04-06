@@ -7,6 +7,7 @@
 #include <inttypes.h>
 #include <endian.h>
 #include <string.h>
+#include <openssl/hmac.h>
 
 /* when reading long integers, never read more than this many bytes: */
 #define MPZ_MAX_LEN 1024
@@ -78,3 +79,12 @@ int deserialize_mpz(mpz_t x, int fd)
 	BYTES2Z(x,buf,nB);
 	return 0;
 }
+
+unsigned char* generate_hmac(const unsigned char* key, int key_length,
+	const unsigned char* msg, int msg_length,
+	unsigned int* hmac_length) {
+		return HMAC(EVP_sha256(),  			// uses the SHA-256 hash function
+					key, key_length,		// shared secret key
+					msg, msg_length,		// message to hash
+					NULL, hmac_length);		// buffer length
+	}

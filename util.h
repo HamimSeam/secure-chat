@@ -32,3 +32,8 @@ void xread(int fd, void *buf, size_t nBytes);
 /** Like write(), but retry on EINTR and EWOULDBLOCK,
  * abort on other errors, and don't return early. */
 void xwrite(int fd, const void *buf, size_t nBytes);
+
+// generates message fingerprint 
+unsigned char* generate_hmac(const unsigned char* key, int key_length,
+	const unsigned char* msg, int msg_length,
+	unsigned int* hmac_length)

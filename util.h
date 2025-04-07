@@ -1,5 +1,6 @@
 #pragma once
 #include <gmp.h>
+#include <openssl/evp.h>
 /* convenience macros */
 #define ISPRIME(x) mpz_probab_prime_p(x,10)
 #define NEWZ(x) mpz_t x; mpz_init(x)
@@ -32,6 +33,11 @@ void xread(int fd, void *buf, size_t nBytes);
 /** Like write(), but retry on EINTR and EWOULDBLOCK,
  * abort on other errors, and don't return early. */
 void xwrite(int fd, const void *buf, size_t nBytes);
+
+int generate_rsa_keys(int role);
+
+int sign_dh_key_with_rsa(EVP_PKEY *rsa_private_key, mpz_t dh_key,
+	unsigned char **signature, size_t *sig_len);
 
 // generates message fingerprint 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,

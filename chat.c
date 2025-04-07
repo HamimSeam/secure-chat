@@ -5,10 +5,12 @@
 #include <netdb.h>
 #include <openssl/sha.h>
 #include <openssl/evp.h>
+#include <openssl/pem.h>
 #include <openssl/hmac.h>
 #include <getopt.h>
 #include "dh.h"
 #include "keys.h"
+#include "util.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
@@ -27,6 +29,8 @@ void* recvMsg(void*);       /* for trecv */
 	 typeof(b) _b = b;    \
 	 _a > _b ? _a : _b; })
 
+
+typedef enum { SERVER, CLIENT } Role;
 /* network stuff... */
 
 static int listensock, sockfd;
@@ -40,6 +44,37 @@ static void error(const char *msg)
 
 int initServerNet(int port)
 {
+	// read in appropiate RSA keys
+	FILE *fp = fopen("keys/server/private.pem", "rb");
+	EVP_PKEY *rsa_sk_server = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
+	fclose(fp);
+
+	printf("\nServer successfully read server private RSA key.\n");
+
+	fp = fopen("keys/client/public.pem", "rb");
+	EVP_PKEY *rsa_pk_client = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
+	fclose(fp);	
+
+	printf("Server successfully read client public RSA key.\n");
+
+	// generate DH keys
+	init("params");
+	mpz_t dh_sk_server, dh_pk_server;
+	mpz_init(dh_sk_server);
+	mpz_init(dh_pk_server);
+	dhGen(dh_sk_server, dh_pk_server);
+
+	printf("Server successfully generated DH key pair.\n");
+
+	// sign DH public key
+    size_t sig_len = EVP_PKEY_size(rsa_sk_server);
+    unsigned char *signature = OPENSSL_malloc(sig_len); 
+
+    sign_dh_key_with_rsa(rsa_sk_server, dh_pk_server, 
+		&signature, &sig_len);
+	
+	printf("Server successfully generated signature of DH public key.\n");
+
 	int reuse = 1;
 	struct sockaddr_in serv_addr;
 	listensock = socket(AF_INET, SOCK_STREAM, 0);
@@ -68,6 +103,37 @@ int initServerNet(int port)
 
 static int initClientNet(char* hostname, int port)
 {
+	// read in appropiate RSA keys
+	FILE *fp = fopen("keys/client/private.pem", "rb");
+	EVP_PKEY *rsa_sk_client = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
+	fclose(fp);
+
+	printf("\nClient successfully read client private RSA key.\n");
+
+	fp = fopen("keys/server/public.pem", "rb");
+	EVP_PKEY *rsa_pk_server = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
+	fclose(fp);	
+
+	printf("Client successfully read server public RSA key.\n");
+
+	// generate DH keys
+	init("params");
+	mpz_t dh_sk_client, dh_pk_client;
+	mpz_init(dh_sk_client);
+	mpz_init(dh_pk_client);
+	dhGen(dh_sk_client, dh_pk_client);
+
+	printf("Client successfully generated DH key pair.\n");
+
+	// sign DH public key
+    size_t sig_len = EVP_PKEY_size(rsa_sk_client);
+    unsigned char *signature = OPENSSL_malloc(sig_len); 
+
+    sign_dh_key_with_rsa(rsa_sk_client, dh_pk_client, 
+		&signature, &sig_len);
+	
+	printf("Client successfully generated signature of DH public key.\n");
+
 	struct sockaddr_in serv_addr;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	struct hostent *server;
@@ -221,7 +287,8 @@ int main(int argc, char *argv[])
 	 * show the messages in the main window instead of stderr/stdout.  If
 	 * you decide to give that a try, this might be of use:
 	 * https://docs.gtk.org/gtk4/func.is_initialized.html */
-	if (isclient) {
+
+	 if (isclient) {
 		initClientNet(hostname,port);
 	} else {
 		initServerNet(port);

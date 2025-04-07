@@ -15,9 +15,14 @@
 #endif
 #include <string.h>
 #include <openssl/hmac.h>
+#include <openssl/sha.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
 
 /* when reading long integers, never read more than this many bytes: */
 #define MPZ_MAX_LEN 1024
+
+static const char* role_str[] = { "server", "client" };
 
 /* Like read(), but retry on EINTR and EWOULDBLOCK,
  * abort on other errors, and don't return early. */
@@ -85,6 +90,127 @@ int deserialize_mpz(mpz_t x, int fd)
 	xread(fd,buf,nB);
 	BYTES2Z(x,buf,nB);
 	return 0;
+}
+
+int generate_rsa_keys(int role) {
+	EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+
+	if (ctx == NULL) {
+		printf("Error creating key context for RSA.\n");
+		return -1;
+	}
+
+	if (EVP_PKEY_keygen_init(ctx) <= 0) {
+        printf("Error initializing key generation.\n");
+        EVP_PKEY_CTX_free(ctx);  // Free the context before returning 
+		return -1;
+    }
+
+    if (EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0) {
+        printf("Error setting RSA key size.\n");
+        EVP_PKEY_CTX_free(ctx);
+        return -1;
+    }
+
+	printf("Initialized key generation and size.\n");
+
+    // Generate the key pair
+    EVP_PKEY *evp_pkey = NULL;
+    if (EVP_PKEY_keygen(ctx, &evp_pkey) <= 0) {
+        printf("Error generating RSA public-private key pair.\n");
+		EVP_PKEY_free(evp_pkey);  // Free the generated key
+        EVP_PKEY_CTX_free(ctx);
+        return -1;
+    }	
+
+	char private_key_path[256];
+	snprintf(private_key_path, sizeof(private_key_path), "keys/%s/private.pem", role_str[role]);
+
+	char public_key_path[256];
+	snprintf(public_key_path, sizeof(public_key_path), "keys/%s/public.pem", role_str[role]);
+
+    // Save the private key
+    FILE *private_key_file = fopen(private_key_path, "wb");
+    if (PEM_write_PrivateKey(private_key_file, evp_pkey, NULL, NULL, 0, NULL, NULL) != 1) {
+        printf("Error saving private key.\n");
+		EVP_PKEY_free(evp_pkey);
+		EVP_PKEY_CTX_free(ctx);
+        return -1;
+    }
+
+    fclose(private_key_file);
+
+    // Save the public key
+    FILE *public_key_file = fopen(public_key_path, "wb");
+    if (PEM_write_PUBKEY(public_key_file, evp_pkey) != 1) {
+        printf("Error saving public key.\n");
+		EVP_PKEY_free(evp_pkey);
+		EVP_PKEY_CTX_free(ctx);
+        return -1;
+    }
+    fclose(public_key_file);
+
+    // Free the allocated memory
+    EVP_PKEY_free(evp_pkey);
+    EVP_PKEY_CTX_free(ctx);
+
+    printf("RSA key pair generated and saved to files.\n");	
+	return 0;
+}
+
+int sign_dh_key_with_rsa(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len) {
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    unsigned char *digest = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
+
+    if (digest == NULL) {
+        printf("Error allocating memory for digest\n");
+        return -1;
+    }
+
+    // Convert mpz_t to a byte array
+    size_t key_len = (mpz_sizeinbase(dh_key, 2) + 7) / 8;  // The number of bytes needed to store the number
+    unsigned char *dh_key_bytes = OPENSSL_malloc(key_len);
+
+    if (dh_key_bytes == NULL) {
+        printf("Error allocating memory for DH key bytes\n");
+        OPENSSL_free(digest);
+        return -1;
+    }
+
+    // Convert the mpz_t value into a byte array
+    mpz_export(dh_key_bytes, &key_len, 1, 1, 0, 0, dh_key);
+
+    // Hash the DH key using SHA256
+    SHA256(dh_key_bytes, key_len, digest);
+
+    // Initialize the signing context
+    EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, rsa_private_key);
+
+    // Update the digest with the hashed DH key
+    EVP_DigestSignUpdate(ctx, digest, SHA256_DIGEST_LENGTH);
+
+    // Determine the required signature length
+    EVP_DigestSignFinal(ctx, NULL, sig_len);
+
+    // Allocate memory for the signature
+    *signature = OPENSSL_malloc(*sig_len);
+
+    if (*signature == NULL) {
+        printf("Error allocating memory for signature\n");
+        OPENSSL_free(digest);
+        OPENSSL_free(dh_key_bytes);
+        return -1;
+    }
+
+    // Generate the actual signature
+    EVP_DigestSignFinal(ctx, *signature, sig_len);
+
+    // Clean up
+    EVP_MD_CTX_free(ctx);
+    OPENSSL_free(digest);
+    OPENSSL_free(dh_key_bytes);
+
+    return 0;
 }
 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,

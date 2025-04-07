@@ -75,6 +75,50 @@ int initServerNet(int port)
 	
 	printf("Server successfully generated signature of DH public key.\n");
 
+	// serialize the mpz DH key to send in SYN 
+	int fds[2];
+	if (pipe(fds) == -1) {
+		perror("Error creating pipe");
+		exit(EXIT_FAILURE);
+	}
+
+	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
+	close(fds[1]); 
+	
+	// write [ key_len, key, sig_len, signature ] to the buf
+	char buf[2048];
+	if (memcpy(buf, &dh_pk_server_len, sizeof(size_t)) == NULL) {
+		perror("Error copying dh_pk_server_len to buffer");
+		close(fds[0]);
+		return -1;
+	}
+
+	ssize_t bytes_read = read(fds[0], buf + sizeof(size_t), dh_pk_server_len);
+	if (bytes_read != dh_pk_server_len) {
+		perror("Error reading from pipe");
+		close(fds[0]);
+		OPENSSL_free(signature);
+		return -1;
+	}	
+
+	if (memcpy(buf + sizeof(size_t) + dh_pk_server_len, &sig_len, sizeof(size_t)) == NULL) {
+		perror("Error copying sig_len to buffer");
+		close(fds[0]);
+		OPENSSL_free(signature);
+		return -1;
+	}
+
+
+	if (memcpy(buf + dh_pk_server_len + 2 * sizeof(size_t), signature, sig_len) == NULL) {
+		perror("Error copying signature to buffer");
+		close(fds[0]);
+		OPENSSL_free(signature);
+		return -1;
+	}
+
+	close(fds[0]);
+	printf("Server successfully key and signature to buffer\n");
+
 	int reuse = 1;
 	struct sockaddr_in serv_addr;
 	listensock = socket(AF_INET, SOCK_STREAM, 0);
@@ -133,6 +177,50 @@ static int initClientNet(char* hostname, int port)
 		&signature, &sig_len);
 	
 	printf("Client successfully generated signature of DH public key.\n");
+
+	// serialize the mpz DH key to send in SYN 
+	int fds[2];
+	if (pipe(fds) == -1) {
+		perror("Error creating pipe");
+		exit(EXIT_FAILURE);
+	}
+
+	size_t dh_pk_client_len = serialize_mpz(fds[1], dh_pk_client);
+	close(fds[1]); 
+	
+	// write [ key_len, key, sig_len, signature ] to the buf
+	char buf[2048];
+	if (memcpy(buf, &dh_pk_client_len, sizeof(size_t)) == NULL) {
+		perror("Error copying dh_pk_client_len to buffer");
+		close(fds[0]);
+		return -1;
+	}
+
+	ssize_t bytes_read = read(fds[0], buf + sizeof(size_t), dh_pk_client_len);
+	if (bytes_read != dh_pk_client_len) {
+		perror("Error reading from pipe");
+		close(fds[0]);
+		OPENSSL_free(signature);
+		return -1;
+	}	
+
+	if (memcpy(buf + sizeof(size_t) + dh_pk_client_len, &sig_len, sizeof(size_t)) == NULL) {
+		perror("Error copying sig_len to buffer");
+		close(fds[0]);
+		OPENSSL_free(signature);
+		return -1;
+	}
+
+
+	if (memcpy(buf + dh_pk_client_len + 2 * sizeof(size_t), signature, sig_len) == NULL) {
+		perror("Error copying signature to buffer");
+		close(fds[0]);
+		OPENSSL_free(signature);
+		return -1;
+	}
+
+	close(fds[0]);
+	printf("Client successfully key and signature to buffer\n");
 
 	struct sockaddr_in serv_addr;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);

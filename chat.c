@@ -11,16 +11,9 @@
 #include "dh.h"
 #include "keys.h"
 #include "util.h"
-#include <limits.h>
-#include <unistd.h>
-
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
-#endif
-
-#ifndef HOST_NAME_MAX
-#define HOST_NAME_MAX 255
 #endif
 
 static GtkTextBuffer* tbuf; /* transcript buffer */
@@ -54,22 +47,14 @@ int initServerNet(int port)
 {
 	// read in appropiate RSA keys
 	FILE *fp = fopen("keys/server/private.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/server/private.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_sk_server = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
-	fclose(fp);	
+	fclose(fp);
 
 	printf("\nServer successfully read server private RSA key.\n");
 
 	fp = fopen("keys/client/public.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/client/public.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_pk_client = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
-	fclose(fp);
+	fclose(fp);	
 
 	printf("Server successfully read client public RSA key.\n");
 
@@ -100,7 +85,7 @@ int initServerNet(int port)
 
 	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
 	// printf("Serialize returned a length of %zu", dh_pk_server_len);
-	close(fds[1]); 
+	// close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
 	char buf[2048];
@@ -118,6 +103,8 @@ int initServerNet(int port)
 		return -1;
 	}	
 
+	
+
 	if (memcpy(buf + sizeof(size_t) + dh_pk_server_len, &sig_len, sizeof(size_t)) == NULL) {
 		perror("Error copying sig_len to buffer");
 		close(fds[0]);
@@ -133,7 +120,7 @@ int initServerNet(int port)
 		return -1;
 	}
 
-	close(fds[0]);
+	// close(fds[0]);
 	printf("Server successfully saved key and signature to buffer\n");
 
 	int reuse = 1;
@@ -167,13 +154,24 @@ int initServerNet(int port)
 	}
 
 	printf("\nServer successfully received signature!\n");
-	handshake = 0;
 
 	mpz_t dh_pk_client;
 	mpz_init(dh_pk_client);
 
 	unsigned char* signature_client = NULL;
-	extract_signature(recv_buf, dh_pk_client, signature_client);
+	size_t sig_len_client;
+
+	extract_signature(recv_buf, dh_pk_client, &signature_client, &sig_len_client, fds);
+	int verify_ok = verify_signature(rsa_pk_client, dh_pk_client, signature_client, sig_len_client);
+	if (verify_ok == 1) {
+		printf("Server successfully verified client signature!.\n");
+	}
+	else if (verify_ok == -1) {
+		printf("Error on verification\n");
+	}
+	else {
+		printf("It just doesnt work.\n");
+	}
 
 	return 0;
 }
@@ -182,22 +180,14 @@ static int initClientNet(char* hostname, int port)
 {
 	// read in appropiate RSA keys
 	FILE *fp = fopen("keys/client/private.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/client/private.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_sk_client = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
 	fclose(fp);
 
 	printf("\nClient successfully read client private RSA key.\n");
 
 	fp = fopen("keys/server/public.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/server/public.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_pk_server = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
-	fclose(fp);
+	fclose(fp);	
 
 	printf("Client successfully read server public RSA key.\n");
 
@@ -206,17 +196,30 @@ static int initClientNet(char* hostname, int port)
 	mpz_t dh_sk_client, dh_pk_client;
 	mpz_init(dh_sk_client);
 	mpz_init(dh_pk_client);
-	dhGen(dh_sk_client, dh_pk_client);
+	if (dhGen(dh_sk_client, dh_pk_client) != 0) {
+		printf("Error in key generation.\n");
+	}
+	gmp_printf("DH PK client at dhGen = %Zd\n", dh_pk_client);
+
+	// unsigned char *bytes = (unsigned char *)mpz_export(NULL, &dh_pk_client, 1, 1, 1, 0, x);
+
+    // printf("Hex dump (%zu bytes):\n", dh_pk_client);
+    // for (size_t i = 0; i < dh_pk_client; i++) {
+    //     printf("%02X ", bytes[i]);
+    // }
+    // printf("\n");
 
 	printf("Client successfully generated DH key pair.\n");
 
 	// sign DH public key
     size_t sig_len = EVP_PKEY_size(rsa_sk_client);
     unsigned char *signature = OPENSSL_malloc(sig_len); 
-
-    generate_signature(rsa_sk_client, dh_pk_client, 
-		&signature, &sig_len);
 	
+	if (generate_signature(rsa_sk_client, dh_pk_client, &signature, &sig_len) != 0) {
+		fprintf(stderr, "Error generating signature\n");
+		return -1;
+	}
+
 	printf("Client successfully generated signature of DH public key.\n");
 
 	// serialize the mpz DH key to send over channel
@@ -238,7 +241,16 @@ static int initClientNet(char* hostname, int port)
 		return -1;
 	}
 
+
 	ssize_t bytes_read = read(fds[0], buf + sizeof(size_t), dh_pk_client_len);
+
+
+	// printf("hex dump of expected dh key:\n");
+	// for (size_t i = 0; i < dh_pk_client_len; i++) {
+	// 	printf("C%02x ", buf[sizeof(size_t) + i]);
+	// }
+
+	
 	if (bytes_read != dh_pk_client_len) {
 		perror("Error reading from pipe");
 		close(fds[0]);
@@ -262,8 +274,22 @@ static int initClientNet(char* hostname, int port)
 	}
 
 	close(fds[0]);
-	printf("Client successfully saved key and signature to buffer\n");
+	// printf("Client successfully saved key and signature to buffer\n");
 
+	// printf("Length of the signature according to client: %zu\n", sig_len);
+	// printf("Hex dump of the signature being sent:\n");
+	// for (size_t i = 0; i < sig_len; i++) {
+	// 	printf("C%02x ", signature[i]);
+	// }
+
+	// printf("dh key being sent over: \n");
+	// gmp_printf("dh key: %Zd\n", dh_pk_client);
+
+	// printf("hex dump of sent dh key:\n");
+	// for (size_t i = 0; i < dh_pk_client_len; i++) {
+	// 	printf("%02x ", buf[i]);
+	// }
+	
 	struct sockaddr_in serv_addr;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	struct hostent *server;
@@ -285,7 +311,6 @@ static int initClientNet(char* hostname, int port)
 	if (send(sockfd, buf, 2048, 0) == -1) {
 		error("ERROR sending signature");
 	}
-	handshake = 0;
 
 	return 0;
 }

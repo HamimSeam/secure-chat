@@ -6,13 +6,8 @@ HEADERS := $(wildcard *.h include/*.h)
 COMMON   := -O2 -Wall -Wformat=2 -Wno-format-nonliteral -march=native -DNDEBUG
 CFLAGS   := $(CFLAGS) $(COMMON) -std=gnu11
 CXXFLAGS := $(CXXFLAGS) $(COMMON)
-CC := /opt/homebrew/bin/gcc-14
-CXX := /opt/homebrew/bin/g++-14
 LD       := $(CC)
 LDFLAGS  := $(LDFLAGS) # -L/path/to/libs/
-CPPFLAGS := -I/opt/homebrew/opt/openssl@3/include
-CPPFLAGS += -I/opt/homebrew/opt/gmp/include
-LDFLAGS  += -L/opt/homebrew/opt/openssl@3/lib
 LDADD    := -lpthread -lcrypto -lgmp $(shell pkg-config --libs gtk+-3.0)
 INCLUDE  := $(shell pkg-config --cflags gtk+-3.0)
 DEFS     := # -DLINUX

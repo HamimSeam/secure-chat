@@ -1,4 +1,6 @@
+#include <stdio.h>  // Add this as the first include
 #include "keys.h"
+#include <gmp.h>
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>

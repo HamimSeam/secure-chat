@@ -11,9 +11,16 @@
 #include "dh.h"
 #include "keys.h"
 #include "util.h"
+#include <limits.h>
+#include <unistd.h>
+
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024
+#endif
+
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 255
 #endif
 
 static GtkTextBuffer* tbuf; /* transcript buffer */
@@ -47,14 +54,22 @@ int initServerNet(int port)
 {
 	// read in appropiate RSA keys
 	FILE *fp = fopen("keys/server/private.pem", "rb");
+	if (!fp) {
+		perror("Failed to open 'keys/server/private.pem'");
+		exit(EXIT_FAILURE);
+	}
 	EVP_PKEY *rsa_sk_server = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
-	fclose(fp);
+	fclose(fp);	
 
 	printf("\nServer successfully read server private RSA key.\n");
 
 	fp = fopen("keys/client/public.pem", "rb");
+	if (!fp) {
+		perror("Failed to open 'keys/client/public.pem'");
+		exit(EXIT_FAILURE);
+	}
 	EVP_PKEY *rsa_pk_client = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
-	fclose(fp);	
+	fclose(fp);
 
 	printf("Server successfully read client public RSA key.\n");
 
@@ -160,14 +175,22 @@ static int initClientNet(char* hostname, int port)
 {
 	// read in appropiate RSA keys
 	FILE *fp = fopen("keys/client/private.pem", "rb");
+	if (!fp) {
+		perror("Failed to open 'keys/client/private.pem'");
+		exit(EXIT_FAILURE);
+	}
 	EVP_PKEY *rsa_sk_client = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
 	fclose(fp);
 
 	printf("\nClient successfully read client private RSA key.\n");
 
 	fp = fopen("keys/server/public.pem", "rb");
+	if (!fp) {
+		perror("Failed to open 'keys/server/public.pem'");
+		exit(EXIT_FAILURE);
+	}
 	EVP_PKEY *rsa_pk_server = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
-	fclose(fp);	
+	fclose(fp);
 
 	printf("Client successfully read server public RSA key.\n");
 

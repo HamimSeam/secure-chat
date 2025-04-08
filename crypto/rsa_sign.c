@@ -8,7 +8,7 @@ typedef enum { SERVER, CLIENT } Role;
 static const char* role_str[] = { "server", "client" };
 
 int main() {
-    init("../params");
+    init("params");
 
     mpz_t sk_mine, pk_mine, sk_yours, pk_yours;
     mpz_init(sk_mine);
@@ -61,7 +61,7 @@ int main() {
     unsigned char *signature = NULL;
     size_t sig_len = 0;
     // Sign the DH key (assuming pk_yours is your DH public key)
-    sign_dh_key_with_rsa(private_key, keybuf, buflen, &signature, &sig_len);
+    sign_dh_key_with_rsa(private_key, pk_yours, &signature, &sig_len);
 
     printf("Successfully signed key!\n");
 

@@ -1,0 +1,15 @@
+CC = gcc
+SRC = crypto/rsa_sign.c util.c dh.c
+OUT = crypto/rsa_sign
+
+OPENSSL = /opt/homebrew/opt/openssl@3
+GMP = /opt/homebrew/opt/gmp
+
+CFLAGS = -Wall -I$(OPENSSL)/include -I$(GMP)/include
+LDFLAGS = -L$(OPENSSL)/lib -L$(GMP)/lib -lcrypto -lgmp
+
+$(OUT): $(SRC)
+	$(CC) -o $(OUT) $(SRC) $(CFLAGS) $(LDFLAGS)
+
+clean:
+	rm -f $(OUT)

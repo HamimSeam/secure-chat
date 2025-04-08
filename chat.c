@@ -11,6 +11,11 @@
 #include "dh.h"
 #include "keys.h"
 #include "util.h"
+#include <limits.h>
+
+#ifndef HOST_NAME_MAX
+#define HOST_NAME_MAX 255
+#endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 1024

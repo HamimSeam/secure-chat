@@ -158,7 +158,7 @@ int generate_rsa_keys(int role) {
 	return 0;
 }
 
-int sign_dh_key_with_rsa(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len) {
+int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len) {
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     unsigned char *digest = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
 
@@ -212,6 +212,45 @@ int sign_dh_key_with_rsa(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char 
 
     return 0;
 }
+
+int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char *signature) {
+    size_t dh_key_len;
+    memcpy(&dh_key_len, buf, sizeof(size_t));
+
+    memcpy(dh_key, buf + sizeof(size_t), dh_key_len);
+
+    size_t sig_len;
+    memcpy(&sig_len, buf + sizeof(size_t) + dh_key_len, sizeof(size_t));
+
+	signature = OPENSSL_malloc(sig_len);
+    memcpy(signature, buf + sizeof(size_t) + dh_key_len + sizeof(size_t), sig_len);
+
+	printf("\nAnd now for the received values: \n");
+
+	printf("\nDH key len written: ");
+	for (size_t i = 0; i < sizeof(size_t); i++) {
+		printf("%02x ", (unsigned char)buf[i]);
+	}
+
+	printf("\nDH key written: ");
+	for (size_t i = 0; i < dh_key_len; i++) {
+		printf("%02x ", (unsigned char)buf[sizeof(size_t) + i]);
+	}
+
+	printf("\nSig len written: ");
+	for (size_t i = 0; i < sizeof(size_t); i++) {
+		printf("%02x ", (unsigned char)buf[sizeof(size_t) + dh_key_len + i]);
+	}
+
+	printf("\nSignature written: ");
+	for (size_t i = 0; i < sig_len; i++) {
+		printf("%02x ", (unsigned char)buf[2 * sizeof(size_t) + dh_key_len + i]);
+	}
+
+    return 0;
+}
+
+int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature);
 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	const unsigned char* msg, int msg_length,

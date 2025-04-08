@@ -24,6 +24,7 @@ static GtkTextMark*   mark; /* used for scrolling to end of transcript, etc */
 static pthread_t trecv;     /* wait for incoming messagess and post to queue */
 void* recvMsg(void*);       /* for trecv */
 static int handshake = 1;
+static unsigned char dh_shared_key[256] = {0};
 
 #define max(a, b)         \
 	({ typeof(a) _a = a;    \
@@ -82,11 +83,6 @@ int initServerNet(int port)
 		&signature, &sig_len, fds);
 	
 	printf("Server successfully generated signature of DH public key.\n");
-	printf("Hex dump of signature from server:\n");
-	for (size_t i = 0; i < sig_len; i++) {
-		printf("%02x ", signature[i]);
-	}
-
 	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
@@ -175,6 +171,12 @@ int initServerNet(int port)
 	if (send(sockfd, buf, 2048, 0) == -1) {
 		error("ERROR sending signature from server.");
 	}
+
+	dhFinal(dh_sk_server, dh_pk_server, dh_pk_client, dh_shared_key, 256);
+	// printf("SERVER SIDE SHARED KEY:\n");
+	// for (size_t i = 0; i < 256; i++) {
+	// 	printf("S%02x ", dh_shared_key[i]);
+	// }
 
 	close(fds[0]);
 	close(fds[1]);
@@ -332,11 +334,6 @@ static int initClientNet(char* hostname, int port)
 
 	extract_signature(recv_buf, dh_pk_server, &signature_server, &sig_len_server, fds);
 
-	printf("Hex dump of signature received from server:\n");
-	for (size_t i = 0; i < sig_len_server; i++) {
-		printf("%02x ", signature_server[i]);
-	}
-
 	int verify_ok = verify_signature(rsa_pk_server, dh_pk_server, signature_server, sig_len_server, fds);
 	if (verify_ok == 1) {
 		printf("Client successfully verified server signature!.\n");
@@ -348,6 +345,11 @@ static int initClientNet(char* hostname, int port)
 		printf("Client failed to verify signature.\n");
 	}
 
+	dhFinal(dh_sk_client, dh_pk_client, dh_pk_server, dh_shared_key, 256);
+	// printf("CLIENT SIDE SHARED KEY:\n");
+	// for (size_t i = 0; i < 256; i++) {
+	// 	printf("C%02x ", dh_shared_key[i]);
+	// }
 
 	close(fds[0]);
 	close(fds[1]);

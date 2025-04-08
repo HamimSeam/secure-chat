@@ -23,8 +23,9 @@ static GtkTextMark*   mark; /* used for scrolling to end of transcript, etc */
 
 static pthread_t trecv;     /* wait for incoming messagess and post to queue */
 void* recvMsg(void*);       /* for trecv */
-static int handshake = 1;
+static int security_mode = 1;
 static unsigned char dh_shared_key[256] = {0};
+unsigned char hmac_buf[2048];
 
 #define max(a, b)         \
 	({ typeof(a) _a = a;    \
@@ -173,14 +174,10 @@ int initServerNet(int port)
 	}
 
 	dhFinal(dh_sk_server, dh_pk_server, dh_pk_client, dh_shared_key, 256);
-	// printf("SERVER SIDE SHARED KEY:\n");
-	// for (size_t i = 0; i < 256; i++) {
-	// 	printf("S%02x ", dh_shared_key[i]);
-	// }
 
 	close(fds[0]);
 	close(fds[1]);
-	handshake = 0;
+	security_mode = 0;
 	return 0;
 }
 
@@ -208,14 +205,6 @@ static int initClientNet(char* hostname, int port)
 		printf("Error in key generation.\n");
 	}
 
-	// unsigned char *bytes = (unsigned char *)mpz_export(NULL, &dh_pk_client, 1, 1, 1, 0, x);
-
-    // printf("Hex dump (%zu bytes):\n", dh_pk_client);
-    // for (size_t i = 0; i < dh_pk_client; i++) {
-    //     printf("%02X ", bytes[i]);
-    // }
-    // printf("\n");
-
 	printf("Client successfully generated DH key pair.\n");
 
 	// serialize the mpz DH key to send over channel
@@ -237,8 +226,6 @@ static int initClientNet(char* hostname, int port)
 	printf("Client successfully generated signature of DH public key.\n");
 
 	size_t dh_pk_client_len = serialize_mpz(fds[1], dh_pk_client);
-	// printf("Serialize returned a length of %zu for client", dh_pk_client_len);
-	// close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
 	char buf[2048];
@@ -248,15 +235,7 @@ static int initClientNet(char* hostname, int port)
 		return -1;
 	}
 
-
 	ssize_t bytes_read = read(fds[0], buf + sizeof(size_t), dh_pk_client_len);
-
-
-	// printf("hex dump of expected dh key:\n");
-	// for (size_t i = 0; i < dh_pk_client_len; i++) {
-	// 	printf("C%02x ", buf[sizeof(size_t) + i]);
-	// }
-
 	
 	if (bytes_read != dh_pk_client_len) {
 		perror("Error reading from pipe");
@@ -280,23 +259,6 @@ static int initClientNet(char* hostname, int port)
 		return -1;
 	}
 
-	// close(fds[0]);
-	// printf("Client successfully saved key and signature to buffer\n");
-
-	// printf("Length of the signature according to client: %zu\n", sig_len);
-	// printf("Hex dump of the signature being sent:\n");
-	// for (size_t i = 0; i < sig_len; i++) {
-	// 	printf("C%02x ", signature[i]);
-	// }
-
-	// printf("dh key being sent over: \n");
-	// gmp_printf("dh key: %Zd\n", dh_pk_client);
-
-	// printf("hex dump of sent dh key:\n");
-	// for (size_t i = 0; i < dh_pk_client_len; i++) {
-	// 	printf("%02x ", buf[i]);
-	// }
-	
 	struct sockaddr_in serv_addr;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	struct hostent *server;
@@ -346,14 +308,10 @@ static int initClientNet(char* hostname, int port)
 	}
 
 	dhFinal(dh_sk_client, dh_pk_client, dh_pk_server, dh_shared_key, 256);
-	// printf("CLIENT SIDE SHARED KEY:\n");
-	// for (size_t i = 0; i < 256; i++) {
-	// 	printf("C%02x ", dh_shared_key[i]);
-	// }
 
 	close(fds[0]);
 	close(fds[1]);
-	handshake = 0;
+	security_mode = 0;
 	return 0;
 }
 
@@ -423,8 +381,24 @@ static void sendMessage(GtkWidget* w /* <-- msg entry widget */, gpointer /* dat
 	size_t len = g_utf8_strlen(message,-1);
 	/* XXX we should probably do the actual network stuff in a different
 	 * thread and have it call this once the message is actually sent. */
+
+	// security_mode = 0; //prevent displaying handshake/hmac contents on GUI
+	unsigned int hmac_len = 0;
+	unsigned char* hmac = generate_hmac(dh_shared_key, 256, (const unsigned char*)message, (int)len, &hmac_len);
+	bundle_hmac(len, message, (size_t)hmac_len, hmac, hmac_buf);
+
+	if (send(sockfd, hmac_buf, 2*sizeof(size_t) + len + hmac_len, 0) == -1) {
+		printf("Error on sending (message, hmac) pair\n");
+	}
+
+	// if (send(sockfd,hmac_buf,hmac_len,0) == -1) {
+	// 	printf("Error on sending (message, hmac) pair\n");
+	// }
+
+	// security_mode = 1; //allow displaying messages on GUI
+
 	ssize_t nbytes;
-	if ((nbytes = send(sockfd,message,len,0)) == -1)
+	if ((nbytes = send(sockfd,hmac_buf,2 * sizeof(size_t) + len + hmac_len,0)) == -1)
 		error("send failed");
 
 	tsappend(message,NULL,1);
@@ -552,19 +526,39 @@ void* recvMsg(void*)
 	char msg[maxlen+2]; /* might add \n and \0 */
 	ssize_t nbytes;
 	while (1) {
-		if ((nbytes = recv(sockfd,msg,maxlen,0)) == -1)
+		// if ((nbytes = recv(sockfd,msg,maxlen,0)) == -1)
+		// 	error("recv failed");
+		// if (nbytes == 0) {
+		// 	/* XXX maybe show in a status message that the other
+		// 	 * side has disconnected. */
+		// 	return 0;
+		// }
+
+		if ((nbytes = recv(sockfd,hmac_buf,2048,0)) == -1)
 			error("recv failed");
 		if (nbytes == 0) {
 			/* XXX maybe show in a status message that the other
 			 * side has disconnected. */
 			return 0;
 		}
-		if (!handshake) {
+
+		size_t len;
+		size_t hmac_len;
+		unsigned char hmac[256];
+		extract_hmac(&len, msg, &hmac_len, hmac, hmac_buf);
+		if (verify_hmac(dh_shared_key, 256, msg, (int)len, hmac, (int)hmac_len) != 1) {
+			printf("Error on verifying HMAC\n");
+		}
+		else {
+			printf("HMAC successfully verified!\n");
+		}
+
+		if (!security_mode) {
 			char* m = malloc(maxlen+2);
-			memcpy(m,msg,nbytes);
-			if (m[nbytes-1] != '\n')
-				m[nbytes++] = '\n';
-			m[nbytes] = 0;
+			memcpy(m,msg,len);
+			if (m[len-1] != '\n')
+				m[len++] = '\n';
+			m[len] = 0;
 			g_main_context_invoke(NULL,shownewmessage,(gpointer)m);
 		}
 	}

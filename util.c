@@ -209,13 +209,12 @@ int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **si
     size_t dh_key_len;
     memcpy(&dh_key_len, buf, sizeof(size_t));
 
-    write(fds[1], buf + sizeof(size_t), dh_key_len);
-    deserialize_mpz(dh_key, fds[0]);
+    if (write(fds[1], buf + sizeof(size_t), dh_key_len) == -1) {
+        printf("Bad write in extract signature.\n");
+        return -1;
+    }
 
-	// printf("hex dump of expected dh key:\n");
-	// for (size_t i = 0; i < dh_key_len; i++) {
-	// 	printf("S%02x ", buf[i]);
-	// }
+    deserialize_mpz(dh_key, fds[0]);
 
     size_t sig_len;
     memcpy(&sig_len, buf + sizeof(size_t) + dh_key_len, sizeof(size_t));
@@ -230,23 +229,37 @@ int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **si
     memcpy(*signature_out,
            buf + sizeof(size_t) + dh_key_len + sizeof(size_t),
            sig_len);
-	
-	// printf("Length of the signature according to server: %zu\n", sig_len);
-	// printf("Hex dump of the signature being extracted:\n");
-	// for (size_t i = 0; i < sig_len; i++) {
-	// 	printf("S%02x ", (unsigned char)buf[sizeof(size_t) + dh_key_len + sizeof(size_t) + i]);
-	// }
+
+    return 0;
+}
+
+int bundle_hmac(size_t len, char* message, size_t hmac_len, unsigned char* hmac, unsigned char* hmac_buf) {
+    memcpy(hmac_buf, &len, sizeof(size_t));
+    memcpy(hmac_buf + sizeof(size_t), message, len);
+    memcpy(hmac_buf + sizeof(size_t) + len, &hmac_len, sizeof(size_t));
+    memcpy(hmac_buf + 2 * sizeof(size_t) + len, hmac, hmac_len);
+
+    return 0;
+}
+
+int extract_hmac(size_t* len, char* message, size_t* hmac_len, unsigned char* hmac, unsigned char* hmac_buf) {
+    memcpy(len, hmac_buf, sizeof(size_t));
+    memcpy(message, hmac_buf + sizeof(size_t), *len);   
+    memcpy(hmac_len, hmac_buf + sizeof(size_t) + *len, sizeof(size_t));
+    memcpy(hmac, hmac_buf + sizeof(size_t) + *len + sizeof(size_t), *hmac_len);
 
     return 0;
 }
 
 int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature, size_t sig_len, int* fds) {
 
-	// Convert dh_key (mpz_t) to bytes
     size_t key_len = serialize_mpz(fds[1], dh_key);
-    // unsigned char *key_buf = (unsigned char *)mpz_export(NULL, &key_len, -1, 1, -1, 0, dh_key);
     unsigned char* key_buf = malloc(key_len);
-    read(fds[0], key_buf, key_len);
+
+    if (read(fds[0], key_buf, key_len) == -1) {
+        printf("Bad read in verify signature.\n");
+        return -1;
+    }
 
     if (!key_buf) {
         fprintf(stderr, "mpz_export failed\n");
@@ -297,11 +310,11 @@ unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	}
 
 int verify_hmac(const unsigned char* key, int key_length,
-	const unsigned char* msg, int msg_length,
+	char* msg, int msg_length,
 	const unsigned char* expected_hmac, int hmac_length) {
 		
 		unsigned int actual_length;
-		unsigned char* actual_hmac = generate_hmac(key, key_length, msg, msg_length, &actual_length);
+		unsigned char* actual_hmac = generate_hmac(key, key_length, (const unsigned char*)msg, msg_length, &actual_length);
 
 		if (!actual_hmac) {
 			printf("generate_hmac() returned NULL!\n");

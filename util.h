@@ -50,8 +50,13 @@ unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	const unsigned char* msg, int msg_length,
 	unsigned int* hmac_length);
 
+// stores [ len | message | hmac_len | hmac ] in hmac_buf to be sent
+int bundle_hmac(size_t len, char* message, size_t hmac_len, unsigned char* hmac, unsigned char* hmac_buf);
+
+int extract_hmac(size_t* len, char* message, size_t* hmac_len, unsigned char* hmac, unsigned char* hmac_buf);
+
 // takes original message and regenerates HMAC using shared key
 // checks against HMAC received and determines validity
 int verify_hmac(const unsigned char* key, int key_length,
-	const unsigned char* msg, int msg_length,
+	char* msg, int msg_length,
 	const unsigned char* expected_hmac, int hmac_length);

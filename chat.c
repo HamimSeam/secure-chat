@@ -23,6 +23,7 @@ static GtkTextMark*   mark; /* used for scrolling to end of transcript, etc */
 
 static pthread_t trecv;     /* wait for incoming messagess and post to queue */
 void* recvMsg(void*);       /* for trecv */
+static int handshake = 1;
 
 #define max(a, b)         \
 	({ typeof(a) _a = a;    \
@@ -75,7 +76,7 @@ int initServerNet(int port)
 	
 	printf("Server successfully generated signature of DH public key.\n");
 
-	// serialize the mpz DH key to send in SYN 
+	// serialize the mpz DH key to send in over channel
 	int fds[2];
 	if (pipe(fds) == -1) {
 		perror("Error creating pipe");
@@ -117,7 +118,7 @@ int initServerNet(int port)
 	}
 
 	close(fds[0]);
-	printf("Server successfully key and signature to buffer\n");
+	printf("Server successfully saved key and signature to buffer\n");
 
 	int reuse = 1;
 	struct sockaddr_in serv_addr;
@@ -142,6 +143,16 @@ int initServerNet(int port)
 	close(listensock);
 	fprintf(stderr, "connection made, starting session...\n");
 	/* at this point, should be able to send/recv on sockfd */
+
+	// do the actual key exchange
+	char recv_buf[2048];
+	if (recv(sockfd, recv_buf, 2048, 0) == -1) {
+		error("ERROR receiving signature\n");
+	}
+	else {
+		printf("\nServer successfully received signature!\n");
+	}
+
 	return 0;
 }
 
@@ -178,7 +189,7 @@ static int initClientNet(char* hostname, int port)
 	
 	printf("Client successfully generated signature of DH public key.\n");
 
-	// serialize the mpz DH key to send in SYN 
+	// serialize the mpz DH key to send over channel
 	int fds[2];
 	if (pipe(fds) == -1) {
 		perror("Error creating pipe");
@@ -220,7 +231,7 @@ static int initClientNet(char* hostname, int port)
 	}
 
 	close(fds[0]);
-	printf("Client successfully key and signature to buffer\n");
+	printf("Client successfully saved key and signature to buffer\n");
 
 	struct sockaddr_in serv_addr;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -239,6 +250,11 @@ static int initClientNet(char* hostname, int port)
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0)
 		error("ERROR connecting");
 	/* at this point, should be able to send/recv on sockfd */
+
+	if (send(sockfd, signature, sig_len, 0) == -1) {
+		error("ERROR sending signature");
+	}
+
 	return 0;
 }
 
@@ -444,12 +460,14 @@ void* recvMsg(void*)
 			 * side has disconnected. */
 			return 0;
 		}
-		char* m = malloc(maxlen+2);
-		memcpy(m,msg,nbytes);
-		if (m[nbytes-1] != '\n')
-			m[nbytes++] = '\n';
-		m[nbytes] = 0;
-		g_main_context_invoke(NULL,shownewmessage,(gpointer)m);
+		if (!handshake) {
+			char* m = malloc(maxlen+2);
+			memcpy(m,msg,nbytes);
+			if (m[nbytes-1] != '\n')
+				m[nbytes++] = '\n';
+			m[nbytes] = 0;
+			g_main_context_invoke(NULL,shownewmessage,(gpointer)m);
+		}
 	}
 	return 0;
 }

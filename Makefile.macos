@@ -1,0 +1,34 @@
+SOURCES := $(wildcard *.c)
+OBJECTS := $(SOURCES:.c=.o)
+HEADERS := $(wildcard *.h)
+
+# Compiler & flags
+COMMON   := -O2 -Wall -Wformat=2 -Wno-format-nonliteral -march=native -DNDEBUG
+CFLAGS   := $(COMMON) -std=gnu11
+LD       := $(CC)
+LDFLAGS  :=
+INCLUDE  := -I/opt/homebrew/opt/openssl@3/include \
+            -I/opt/homebrew/opt/gmp/include \
+            $(shell pkg-config --cflags gtk+-3.0)
+
+LDADD    := -L/opt/homebrew/opt/gmp/lib \
+            -L/opt/homebrew/opt/openssl@3/lib \
+            -lgmp -lcrypto -lpthread \
+            $(shell pkg-config --libs gtk+-3.0)
+TARGETS  := chat dh-example
+
+.PHONY: all
+all: $(TARGETS)
+
+chat: chat.o dh.o keys.o util.o
+	$(LD) $(LDFLAGS) -o $@ $^ $(LDADD)
+
+dh-example: dh-example.o dh.o keys.o util.o
+	$(LD) $(LDFLAGS) -o $@ $^ $(LDADD)
+
+%.o: %.c $(HEADERS)
+	$(CC) $(INCLUDE) $(CFLAGS) -c $< -o $@
+
+.PHONY: clean
+clean:
+	rm -f $(TARGETS) $(OBJECTS)

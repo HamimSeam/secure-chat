@@ -212,9 +212,6 @@ int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **si
     write(fds[1], buf + sizeof(size_t), dh_key_len);
     deserialize_mpz(dh_key, fds[0]);
 
-	printf("dh key being used in extraction: \n");
-	gmp_printf("dh key: %Zd\n", dh_key);
-
 	// printf("hex dump of expected dh key:\n");
 	// for (size_t i = 0; i < dh_key_len; i++) {
 	// 	printf("S%02x ", buf[i]);

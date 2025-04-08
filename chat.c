@@ -82,10 +82,12 @@ int initServerNet(int port)
 		&signature, &sig_len, fds);
 	
 	printf("Server successfully generated signature of DH public key.\n");
+	printf("Hex dump of signature from server:\n");
+	for (size_t i = 0; i < sig_len; i++) {
+		printf("%02x ", signature[i]);
+	}
 
 	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
-	// printf("Serialize returned a length of %zu", dh_pk_server_len);
-	// close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
 	char buf[2048];
@@ -103,8 +105,6 @@ int initServerNet(int port)
 		return -1;
 	}	
 
-	
-
 	if (memcpy(buf + sizeof(size_t) + dh_pk_server_len, &sig_len, sizeof(size_t)) == NULL) {
 		perror("Error copying sig_len to buffer");
 		close(fds[0]);
@@ -120,7 +120,6 @@ int initServerNet(int port)
 		return -1;
 	}
 
-	// close(fds[0]);
 	printf("Server successfully saved key and signature to buffer\n");
 
 	int reuse = 1;
@@ -150,7 +149,7 @@ int initServerNet(int port)
 	// do the actual key exchange
 	unsigned char recv_buf[2048];
 	if (recv(sockfd, recv_buf, 2048, 0) == -1) {
-		error("ERROR receiving signature\n");
+		error("ERROR receiving signature from client.\n");
 	}
 
 	printf("\nServer successfully received signature!\n");
@@ -170,9 +169,16 @@ int initServerNet(int port)
 		printf("Error on verification\n");
 	}
 	else {
-		printf("It just doesnt work.\n");
+		printf("Signature verification failed.\n");
 	}
 
+	if (send(sockfd, buf, 2048, 0) == -1) {
+		error("ERROR sending signature from server.");
+	}
+
+	close(fds[0]);
+	close(fds[1]);
+	handshake = 0;
 	return 0;
 }
 
@@ -199,7 +205,6 @@ static int initClientNet(char* hostname, int port)
 	if (dhGen(dh_sk_client, dh_pk_client) != 0) {
 		printf("Error in key generation.\n");
 	}
-	gmp_printf("DH PK client at dhGen = %Zd\n", dh_pk_client);
 
 	// unsigned char *bytes = (unsigned char *)mpz_export(NULL, &dh_pk_client, 1, 1, 1, 0, x);
 
@@ -231,7 +236,7 @@ static int initClientNet(char* hostname, int port)
 
 	size_t dh_pk_client_len = serialize_mpz(fds[1], dh_pk_client);
 	// printf("Serialize returned a length of %zu for client", dh_pk_client_len);
-	close(fds[1]); 
+	// close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
 	char buf[2048];
@@ -273,7 +278,7 @@ static int initClientNet(char* hostname, int port)
 		return -1;
 	}
 
-	close(fds[0]);
+	// close(fds[0]);
 	// printf("Client successfully saved key and signature to buffer\n");
 
 	// printf("Length of the signature according to client: %zu\n", sig_len);
@@ -312,6 +317,41 @@ static int initClientNet(char* hostname, int port)
 		error("ERROR sending signature");
 	}
 
+	unsigned char recv_buf[2048];
+	if (recv(sockfd, recv_buf, 2048, 0) == -1) {
+		error("ERROR receiving signature from client.\n");
+	}
+
+	printf("\nServer successfully received signature!\n");
+
+	mpz_t dh_pk_server;
+	mpz_init(dh_pk_server);
+
+	unsigned char* signature_server = NULL;
+	size_t sig_len_server;
+
+	extract_signature(recv_buf, dh_pk_server, &signature_server, &sig_len_server, fds);
+
+	printf("Hex dump of signature received from server:\n");
+	for (size_t i = 0; i < sig_len_server; i++) {
+		printf("%02x ", signature_server[i]);
+	}
+
+	int verify_ok = verify_signature(rsa_pk_server, dh_pk_server, signature_server, sig_len_server, fds);
+	if (verify_ok == 1) {
+		printf("Client successfully verified server signature!.\n");
+	}
+	else if (verify_ok == -1) {
+		printf("Error on verification\n");
+	}
+	else {
+		printf("Client failed to verify signature.\n");
+	}
+
+
+	close(fds[0]);
+	close(fds[1]);
+	handshake = 0;
 	return 0;
 }
 

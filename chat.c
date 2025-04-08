@@ -122,8 +122,6 @@ int initServerNet(int port)
 		return -1;
 	}
 
-	printf("Server successfully saved key and signature to buffer\n");
-
 	int reuse = 1;
 	struct sockaddr_in serv_addr;
 	listensock = socket(AF_INET, SOCK_STREAM, 0);
@@ -165,7 +163,7 @@ int initServerNet(int port)
 	extract_signature(recv_buf, dh_pk_client, &signature_client, &sig_len_client, fds);
 	int verify_ok = verify_signature(rsa_pk_client, dh_pk_client, signature_client, sig_len_client, fds);
 	if (verify_ok == 1) {
-		printf("Server successfully verified client signature!.\n");
+		printf("Server successfully verified client signature!\n");
 	}
 	else if (verify_ok == -1) {
 		printf("Error on verification\n");
@@ -291,7 +289,7 @@ static int initClientNet(char* hostname, int port)
 		error("ERROR receiving signature from client.\n");
 	}
 
-	printf("\nServer successfully received signature!\n");
+	printf("\nClient successfully received signature!\n");
 
 	mpz_t dh_pk_server;
 	mpz_init(dh_pk_server);
@@ -303,7 +301,7 @@ static int initClientNet(char* hostname, int port)
 
 	int verify_ok = verify_signature(rsa_pk_server, dh_pk_server, signature_server, sig_len_server, fds);
 	if (verify_ok == 1) {
-		printf("Client successfully verified server signature!.\n");
+		printf("Client successfully verified server signature!\n");
 	}
 	else if (verify_ok == -1) {
 		printf("Error on verification\n");

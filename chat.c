@@ -167,6 +167,7 @@ int initServerNet(int port)
 	}
 
 	printf("\nServer successfully received signature!\n");
+	handshake = 0;
 
 	mpz_t dh_pk_client;
 	mpz_init(dh_pk_client);
@@ -284,6 +285,7 @@ static int initClientNet(char* hostname, int port)
 	if (send(sockfd, buf, 2048, 0) == -1) {
 		error("ERROR sending signature");
 	}
+	handshake = 0;
 
 	return 0;
 }

@@ -37,21 +37,26 @@ void xwrite(int fd, const void *buf, size_t nBytes);
 int generate_rsa_keys(int role);
 
 int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key,
-	unsigned char **signature, size_t *sig_len);
+	unsigned char **signature, size_t *sig_len, int* fds);
 
 // decompose the received DH key + signature into its components
-int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char *signature);
+int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **signature_out, size_t* sig_len_out, int* fds);
 
 // hash the DH key and verify its origin
-int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature);
+int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature, size_t sig_len, int* fds);
 
 // generates message fingerprint 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	const unsigned char* msg, int msg_length,
 	unsigned int* hmac_length);
 
+// stores [ len | message | hmac_len | hmac ] in hmac_buf to be sent
+int bundle_hmac(size_t len, char* message, size_t hmac_len, unsigned char* hmac, unsigned char* hmac_buf);
+
+int extract_hmac(size_t* len, char* message, size_t* hmac_len, unsigned char* hmac, unsigned char* hmac_buf);
+
 // takes original message and regenerates HMAC using shared key
 // checks against HMAC received and determines validity
 int verify_hmac(const unsigned char* key, int key_length,
-	const unsigned char* msg, int msg_length,
+	char* msg, int msg_length,
 	const unsigned char* expected_hmac, int hmac_length);

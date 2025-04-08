@@ -12,15 +12,13 @@
 #include "keys.h"
 #include "util.h"
 #include <limits.h>
-#include <unistd.h>
-
-
-#ifndef PATH_MAX
-#define PATH_MAX 1024
-#endif
 
 #ifndef HOST_NAME_MAX
 #define HOST_NAME_MAX 255
+#endif
+
+#ifndef PATH_MAX
+#define PATH_MAX 1024
 #endif
 
 static GtkTextBuffer* tbuf; /* transcript buffer */
@@ -30,7 +28,9 @@ static GtkTextMark*   mark; /* used for scrolling to end of transcript, etc */
 
 static pthread_t trecv;     /* wait for incoming messagess and post to queue */
 void* recvMsg(void*);       /* for trecv */
-static int handshake = 1;
+static int security_mode = 1;
+static unsigned char dh_shared_key[256] = {0};
+unsigned char hmac_buf[2048];
 
 #define max(a, b)         \
 	({ typeof(a) _a = a;    \
@@ -54,24 +54,23 @@ int initServerNet(int port)
 {
 	// read in appropiate RSA keys
 	FILE *fp = fopen("keys/server/private.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/server/private.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_sk_server = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
-	fclose(fp);	
+	fclose(fp);
 
 	printf("\nServer successfully read server private RSA key.\n");
 
 	fp = fopen("keys/client/public.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/client/public.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_pk_client = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
-	fclose(fp);
+	fclose(fp);	
 
 	printf("Server successfully read client public RSA key.\n");
+
+	// serialize the mpz DH key to send in over channel
+	int fds[2];
+	if (pipe(fds) == -1) {
+		perror("Error creating pipe");
+		exit(EXIT_FAILURE);
+	}
 
 	// generate DH keys
 	init("params");
@@ -87,20 +86,10 @@ int initServerNet(int port)
     unsigned char *signature = OPENSSL_malloc(sig_len); 
 
     generate_signature(rsa_sk_server, dh_pk_server, 
-		&signature, &sig_len);
+		&signature, &sig_len, fds);
 	
 	printf("Server successfully generated signature of DH public key.\n");
-
-	// serialize the mpz DH key to send in over channel
-	int fds[2];
-	if (pipe(fds) == -1) {
-		perror("Error creating pipe");
-		exit(EXIT_FAILURE);
-	}
-
 	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
-	// printf("Serialize returned a length of %zu", dh_pk_server_len);
-	close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
 	char buf[2048];
@@ -133,7 +122,6 @@ int initServerNet(int port)
 		return -1;
 	}
 
-	close(fds[0]);
 	printf("Server successfully saved key and signature to buffer\n");
 
 	int reuse = 1;
@@ -163,18 +151,38 @@ int initServerNet(int port)
 	// do the actual key exchange
 	unsigned char recv_buf[2048];
 	if (recv(sockfd, recv_buf, 2048, 0) == -1) {
-		error("ERROR receiving signature\n");
+		error("ERROR receiving signature from client.\n");
 	}
 
 	printf("\nServer successfully received signature!\n");
-	handshake = 0;
 
 	mpz_t dh_pk_client;
 	mpz_init(dh_pk_client);
 
 	unsigned char* signature_client = NULL;
-	extract_signature(recv_buf, dh_pk_client, signature_client);
+	size_t sig_len_client;
 
+	extract_signature(recv_buf, dh_pk_client, &signature_client, &sig_len_client, fds);
+	int verify_ok = verify_signature(rsa_pk_client, dh_pk_client, signature_client, sig_len_client, fds);
+	if (verify_ok == 1) {
+		printf("Server successfully verified client signature!.\n");
+	}
+	else if (verify_ok == -1) {
+		printf("Error on verification\n");
+	}
+	else {
+		printf("Signature verification failed.\n");
+	}
+
+	if (send(sockfd, buf, 2048, 0) == -1) {
+		error("ERROR sending signature from server.");
+	}
+
+	dhFinal(dh_sk_server, dh_pk_server, dh_pk_client, dh_shared_key, 256);
+
+	close(fds[0]);
+	close(fds[1]);
+	security_mode = 0;
 	return 0;
 }
 
@@ -182,22 +190,14 @@ static int initClientNet(char* hostname, int port)
 {
 	// read in appropiate RSA keys
 	FILE *fp = fopen("keys/client/private.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/client/private.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_sk_client = PEM_read_PrivateKey(fp, NULL, NULL, NULL);
 	fclose(fp);
 
 	printf("\nClient successfully read client private RSA key.\n");
 
 	fp = fopen("keys/server/public.pem", "rb");
-	if (!fp) {
-		perror("Failed to open 'keys/server/public.pem'");
-		exit(EXIT_FAILURE);
-	}
 	EVP_PKEY *rsa_pk_server = PEM_read_PUBKEY(fp, NULL, NULL, NULL);
-	fclose(fp);
+	fclose(fp);	
 
 	printf("Client successfully read server public RSA key.\n");
 
@@ -206,18 +206,11 @@ static int initClientNet(char* hostname, int port)
 	mpz_t dh_sk_client, dh_pk_client;
 	mpz_init(dh_sk_client);
 	mpz_init(dh_pk_client);
-	dhGen(dh_sk_client, dh_pk_client);
+	if (dhGen(dh_sk_client, dh_pk_client) != 0) {
+		printf("Error in key generation.\n");
+	}
 
 	printf("Client successfully generated DH key pair.\n");
-
-	// sign DH public key
-    size_t sig_len = EVP_PKEY_size(rsa_sk_client);
-    unsigned char *signature = OPENSSL_malloc(sig_len); 
-
-    generate_signature(rsa_sk_client, dh_pk_client, 
-		&signature, &sig_len);
-	
-	printf("Client successfully generated signature of DH public key.\n");
 
 	// serialize the mpz DH key to send over channel
 	int fds[2];
@@ -226,9 +219,18 @@ static int initClientNet(char* hostname, int port)
 		exit(EXIT_FAILURE);
 	}
 
+	// sign DH public key
+    size_t sig_len = EVP_PKEY_size(rsa_sk_client);
+    unsigned char *signature = OPENSSL_malloc(sig_len); 
+	
+	if (generate_signature(rsa_sk_client, dh_pk_client, &signature, &sig_len, fds) != 0) {
+		fprintf(stderr, "Error generating signature\n");
+		return -1;
+	}
+
+	printf("Client successfully generated signature of DH public key.\n");
+
 	size_t dh_pk_client_len = serialize_mpz(fds[1], dh_pk_client);
-	// printf("Serialize returned a length of %zu for client", dh_pk_client_len);
-	close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
 	char buf[2048];
@@ -239,6 +241,7 @@ static int initClientNet(char* hostname, int port)
 	}
 
 	ssize_t bytes_read = read(fds[0], buf + sizeof(size_t), dh_pk_client_len);
+	
 	if (bytes_read != dh_pk_client_len) {
 		perror("Error reading from pipe");
 		close(fds[0]);
@@ -261,9 +264,6 @@ static int initClientNet(char* hostname, int port)
 		return -1;
 	}
 
-	close(fds[0]);
-	printf("Client successfully saved key and signature to buffer\n");
-
 	struct sockaddr_in serv_addr;
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	struct hostent *server;
@@ -285,8 +285,38 @@ static int initClientNet(char* hostname, int port)
 	if (send(sockfd, buf, 2048, 0) == -1) {
 		error("ERROR sending signature");
 	}
-	handshake = 0;
 
+	unsigned char recv_buf[2048];
+	if (recv(sockfd, recv_buf, 2048, 0) == -1) {
+		error("ERROR receiving signature from client.\n");
+	}
+
+	printf("\nServer successfully received signature!\n");
+
+	mpz_t dh_pk_server;
+	mpz_init(dh_pk_server);
+
+	unsigned char* signature_server = NULL;
+	size_t sig_len_server;
+
+	extract_signature(recv_buf, dh_pk_server, &signature_server, &sig_len_server, fds);
+
+	int verify_ok = verify_signature(rsa_pk_server, dh_pk_server, signature_server, sig_len_server, fds);
+	if (verify_ok == 1) {
+		printf("Client successfully verified server signature!.\n");
+	}
+	else if (verify_ok == -1) {
+		printf("Error on verification\n");
+	}
+	else {
+		printf("Client failed to verify signature.\n");
+	}
+
+	dhFinal(dh_sk_client, dh_pk_client, dh_pk_server, dh_shared_key, 256);
+
+	close(fds[0]);
+	close(fds[1]);
+	security_mode = 0;
 	return 0;
 }
 
@@ -356,8 +386,24 @@ static void sendMessage(GtkWidget* w /* <-- msg entry widget */, gpointer /* dat
 	size_t len = g_utf8_strlen(message,-1);
 	/* XXX we should probably do the actual network stuff in a different
 	 * thread and have it call this once the message is actually sent. */
+
+	// security_mode = 0; //prevent displaying handshake/hmac contents on GUI
+	unsigned int hmac_len = 0;
+	unsigned char* hmac = generate_hmac(dh_shared_key, 256, (const unsigned char*)message, (int)len, &hmac_len);
+	bundle_hmac(len, message, (size_t)hmac_len, hmac, hmac_buf);
+
+	if (send(sockfd, hmac_buf, 2*sizeof(size_t) + len + hmac_len, 0) == -1) {
+		printf("Error on sending (message, hmac) pair\n");
+	}
+
+	// if (send(sockfd,hmac_buf,hmac_len,0) == -1) {
+	// 	printf("Error on sending (message, hmac) pair\n");
+	// }
+
+	// security_mode = 1; //allow displaying messages on GUI
+
 	ssize_t nbytes;
-	if ((nbytes = send(sockfd,message,len,0)) == -1)
+	if ((nbytes = send(sockfd,hmac_buf,2 * sizeof(size_t) + len + hmac_len,0)) == -1)
 		error("send failed");
 
 	tsappend(message,NULL,1);
@@ -485,19 +531,39 @@ void* recvMsg(void*)
 	char msg[maxlen+2]; /* might add \n and \0 */
 	ssize_t nbytes;
 	while (1) {
-		if ((nbytes = recv(sockfd,msg,maxlen,0)) == -1)
+		// if ((nbytes = recv(sockfd,msg,maxlen,0)) == -1)
+		// 	error("recv failed");
+		// if (nbytes == 0) {
+		// 	/* XXX maybe show in a status message that the other
+		// 	 * side has disconnected. */
+		// 	return 0;
+		// }
+
+		if ((nbytes = recv(sockfd,hmac_buf,2048,0)) == -1)
 			error("recv failed");
 		if (nbytes == 0) {
 			/* XXX maybe show in a status message that the other
 			 * side has disconnected. */
 			return 0;
 		}
-		if (!handshake) {
+
+		size_t len;
+		size_t hmac_len;
+		unsigned char hmac[256];
+		extract_hmac(&len, msg, &hmac_len, hmac, hmac_buf);
+		if (verify_hmac(dh_shared_key, 256, msg, (int)len, hmac, (int)hmac_len) != 1) {
+			printf("Error on verifying HMAC\n");
+		}
+		else {
+			printf("HMAC successfully verified!\n");
+		}
+
+		if (!security_mode) {
 			char* m = malloc(maxlen+2);
-			memcpy(m,msg,nbytes);
-			if (m[nbytes-1] != '\n')
-				m[nbytes++] = '\n';
-			m[nbytes] = 0;
+			memcpy(m,msg,len);
+			if (m[len-1] != '\n')
+				m[len++] = '\n';
+			m[len] = 0;
 			g_main_context_invoke(NULL,shownewmessage,(gpointer)m);
 		}
 	}

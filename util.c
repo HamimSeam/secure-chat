@@ -158,99 +158,147 @@ int generate_rsa_keys(int role) {
 	return 0;
 }
 
-int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len) {
+int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len, int* fds) {
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-    unsigned char *digest = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
+    if (!ctx) return -1;
 
-    if (digest == NULL) {
-        printf("Error allocating memory for digest\n");
-        return -1;
+    // size_t key_len = (mpz_sizeinbase(dh_key, 2) + 7) / 8;
+    // unsigned char *dh_key_bytes = OPENSSL_malloc(key_len);
+    // if (!dh_key_bytes) {
+    //     EVP_MD_CTX_free(ctx);
+    //     return -1;
+    // }
+    
+    size_t key_len = serialize_mpz(fds[1], dh_key);
+    unsigned char *dh_key_bytes = malloc(key_len);
+    if (read(fds[0], dh_key_bytes, key_len) <= 0) {
+        printf("Error on reading dh_key bytes in generate_signature.");
     }
 
-    // Convert mpz_t to a byte array
-    size_t key_len = (mpz_sizeinbase(dh_key, 2) + 7) / 8;  // The number of bytes needed to store the number
-    unsigned char *dh_key_bytes = OPENSSL_malloc(key_len);
+    // gmp_printf("DH PK client at generate_signature = %Zd\n", dh_key);
+    // mpz_export(dh_key_bytes, &key_len, 1, 1, 0, 0, dh_key);
 
-    if (dh_key_bytes == NULL) {
-        printf("Error allocating memory for DH key bytes\n");
-        OPENSSL_free(digest);
-        return -1;
-    }
-
-    // Convert the mpz_t value into a byte array
-    mpz_export(dh_key_bytes, &key_len, 1, 1, 0, 0, dh_key);
-
-    // Hash the DH key using SHA256
-    SHA256(dh_key_bytes, key_len, digest);
-
-    // Initialize the signing context
-    EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, rsa_private_key);
-
-    // Update the digest with the hashed DH key
-    EVP_DigestSignUpdate(ctx, digest, SHA256_DIGEST_LENGTH);
-
-    // Determine the required signature length
-    EVP_DigestSignFinal(ctx, NULL, sig_len);
-
-    // Allocate memory for the signature
-    *signature = OPENSSL_malloc(*sig_len);
-
-    if (*signature == NULL) {
-        printf("Error allocating memory for signature\n");
-        OPENSSL_free(digest);
+    if (EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, rsa_private_key) != 1 ||
+        EVP_DigestSignUpdate(ctx, dh_key_bytes, key_len) != 1) {
+        EVP_MD_CTX_free(ctx);
         OPENSSL_free(dh_key_bytes);
         return -1;
     }
 
-    // Generate the actual signature
-    EVP_DigestSignFinal(ctx, *signature, sig_len);
+    *signature = OPENSSL_malloc(*sig_len);
+    if (!*signature) {
+        EVP_MD_CTX_free(ctx);
+        OPENSSL_free(dh_key_bytes);
+        return -1;
+    }
 
-    // Clean up
+    if (EVP_DigestSignFinal(ctx, *signature, sig_len) != 1) {
+        EVP_MD_CTX_free(ctx);
+        OPENSSL_free(dh_key_bytes);
+        OPENSSL_free(*signature);
+        return -1;
+    }
+
     EVP_MD_CTX_free(ctx);
-    OPENSSL_free(digest);
     OPENSSL_free(dh_key_bytes);
-
     return 0;
 }
 
-int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char *signature) {
+
+int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **signature_out, size_t *sig_len_out, int* fds) {
     size_t dh_key_len;
     memcpy(&dh_key_len, buf, sizeof(size_t));
 
-    memcpy(dh_key, buf + sizeof(size_t), dh_key_len);
+    if (write(fds[1], buf + sizeof(size_t), dh_key_len) == -1) {
+        printf("Bad write in extract signature.\n");
+        return -1;
+    }
+
+    deserialize_mpz(dh_key, fds[0]);
 
     size_t sig_len;
     memcpy(&sig_len, buf + sizeof(size_t) + dh_key_len, sizeof(size_t));
+    *sig_len_out = sig_len;
 
-	signature = OPENSSL_malloc(sig_len);
-    memcpy(signature, buf + sizeof(size_t) + dh_key_len + sizeof(size_t), sig_len);
+    *signature_out = OPENSSL_malloc(sig_len);
+    if (!*signature_out) {
+		printf("Allocation failure in extraction.\n");
+        return -1; // Allocation failure
+    }
 
-	printf("\nAnd now for the received values: \n");
-
-	printf("\nDH key len written: ");
-	for (size_t i = 0; i < sizeof(size_t); i++) {
-		printf("%02x ", (unsigned char)buf[i]);
-	}
-
-	printf("\nDH key written: ");
-	for (size_t i = 0; i < dh_key_len; i++) {
-		printf("%02x ", (unsigned char)buf[sizeof(size_t) + i]);
-	}
-
-	printf("\nSig len written: ");
-	for (size_t i = 0; i < sizeof(size_t); i++) {
-		printf("%02x ", (unsigned char)buf[sizeof(size_t) + dh_key_len + i]);
-	}
-
-	printf("\nSignature written: ");
-	for (size_t i = 0; i < sig_len; i++) {
-		printf("%02x ", (unsigned char)buf[2 * sizeof(size_t) + dh_key_len + i]);
-	}
+    memcpy(*signature_out,
+           buf + sizeof(size_t) + dh_key_len + sizeof(size_t),
+           sig_len);
 
     return 0;
 }
 
-int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature);
+int bundle_hmac(size_t len, char* message, size_t hmac_len, unsigned char* hmac, unsigned char* hmac_buf) {
+    memcpy(hmac_buf, &len, sizeof(size_t));
+    memcpy(hmac_buf + sizeof(size_t), message, len);
+    memcpy(hmac_buf + sizeof(size_t) + len, &hmac_len, sizeof(size_t));
+    memcpy(hmac_buf + 2 * sizeof(size_t) + len, hmac, hmac_len);
+
+    return 0;
+}
+
+int extract_hmac(size_t* len, char* message, size_t* hmac_len, unsigned char* hmac, unsigned char* hmac_buf) {
+    memcpy(len, hmac_buf, sizeof(size_t));
+    memcpy(message, hmac_buf + sizeof(size_t), *len);   
+    memcpy(hmac_len, hmac_buf + sizeof(size_t) + *len, sizeof(size_t));
+    memcpy(hmac, hmac_buf + sizeof(size_t) + *len + sizeof(size_t), *hmac_len);
+
+    return 0;
+}
+
+int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature, size_t sig_len, int* fds) {
+
+    size_t key_len = serialize_mpz(fds[1], dh_key);
+    unsigned char* key_buf = malloc(key_len);
+
+    if (read(fds[0], key_buf, key_len) == -1) {
+        printf("Bad read in verify signature.\n");
+        return -1;
+    }
+
+    if (!key_buf) {
+        fprintf(stderr, "mpz_export failed\n");
+        return -1;
+    }
+
+    // Create and initialize the EVP_MD_CTX
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    if (!ctx) {
+        free(key_buf);
+        fprintf(stderr, "EVP_MD_CTX_new failed\n");
+        return -1;
+    }
+
+    int ret = 0;
+
+    // Initialize verification context
+    if (EVP_DigestVerifyInit(ctx, NULL, EVP_sha256(), NULL, rsa_public_key) != 1 ||
+        EVP_DigestVerifyUpdate(ctx, key_buf, key_len) != 1) {
+        fprintf(stderr, "DigestVerifyInit/Update failed\n");
+        ret = -1;
+    } else {
+        // Perform the verification
+        int verify_ok = EVP_DigestVerifyFinal(ctx, signature, sig_len);
+        if (verify_ok == 1) {
+            ret = 1; // signature valid
+        } else if (verify_ok == 0) {
+            ret = 0; // signature invalid
+        } else {
+            fprintf(stderr, "DigestVerifyFinal error\n");
+            ret = -1;
+        }
+    }
+
+    EVP_MD_CTX_free(ctx);
+    free(key_buf);
+    return ret;
+}
+
 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	const unsigned char* msg, int msg_length,
@@ -262,11 +310,11 @@ unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	}
 
 int verify_hmac(const unsigned char* key, int key_length,
-	const unsigned char* msg, int msg_length,
+	char* msg, int msg_length,
 	const unsigned char* expected_hmac, int hmac_length) {
 		
 		unsigned int actual_length;
-		unsigned char* actual_hmac = generate_hmac(key, key_length, msg, msg_length, &actual_length);
+		unsigned char* actual_hmac = generate_hmac(key, key_length, (const unsigned char*)msg, msg_length, &actual_length);
 
 		if (!actual_hmac) {
 			printf("generate_hmac() returned NULL!\n");

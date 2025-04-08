@@ -158,18 +158,25 @@ int generate_rsa_keys(int role) {
 	return 0;
 }
 
-int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len) {
+int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key, unsigned char **signature, size_t *sig_len, int* fds) {
     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
     if (!ctx) return -1;
 
-    size_t key_len = (mpz_sizeinbase(dh_key, 2) + 7) / 8;
-    unsigned char *dh_key_bytes = OPENSSL_malloc(key_len);
-    if (!dh_key_bytes) {
-        EVP_MD_CTX_free(ctx);
-        return -1;
+    // size_t key_len = (mpz_sizeinbase(dh_key, 2) + 7) / 8;
+    // unsigned char *dh_key_bytes = OPENSSL_malloc(key_len);
+    // if (!dh_key_bytes) {
+    //     EVP_MD_CTX_free(ctx);
+    //     return -1;
+    // }
+    
+    size_t key_len = serialize_mpz(fds[1], dh_key);
+    unsigned char *dh_key_bytes = malloc(key_len);
+    if (read(fds[0], dh_key_bytes, key_len) <= 0) {
+        printf("Error on reading dh_key bytes in generate_signature.");
     }
 
-    mpz_export(dh_key_bytes, &key_len, 1, 1, 0, 0, dh_key);
+    // gmp_printf("DH PK client at generate_signature = %Zd\n", dh_key);
+    // mpz_export(dh_key_bytes, &key_len, 1, 1, 0, 0, dh_key);
 
     if (EVP_DigestSignInit(ctx, NULL, EVP_sha256(), NULL, rsa_private_key) != 1 ||
         EVP_DigestSignUpdate(ctx, dh_key_bytes, key_len) != 1) {
@@ -236,11 +243,14 @@ int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **si
     return 0;
 }
 
-int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature, size_t sig_len) {
+int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature, size_t sig_len, int* fds) {
 
 	// Convert dh_key (mpz_t) to bytes
-    size_t key_len;
-    unsigned char *key_buf = (unsigned char *)mpz_export(NULL, &key_len, -1, 1, -1, 0, dh_key);
+    size_t key_len = serialize_mpz(fds[1], dh_key);
+    // unsigned char *key_buf = (unsigned char *)mpz_export(NULL, &key_len, -1, 1, -1, 0, dh_key);
+    unsigned char* key_buf = malloc(key_len);
+    read(fds[0], key_buf, key_len);
+
     if (!key_buf) {
         fprintf(stderr, "mpz_export failed\n");
         return -1;

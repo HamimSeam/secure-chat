@@ -58,6 +58,13 @@ int initServerNet(int port)
 
 	printf("Server successfully read client public RSA key.\n");
 
+	// serialize the mpz DH key to send in over channel
+	int fds[2];
+	if (pipe(fds) == -1) {
+		perror("Error creating pipe");
+		exit(EXIT_FAILURE);
+	}
+
 	// generate DH keys
 	init("params");
 	mpz_t dh_sk_server, dh_pk_server;
@@ -72,16 +79,9 @@ int initServerNet(int port)
     unsigned char *signature = OPENSSL_malloc(sig_len); 
 
     generate_signature(rsa_sk_server, dh_pk_server, 
-		&signature, &sig_len);
+		&signature, &sig_len, fds);
 	
 	printf("Server successfully generated signature of DH public key.\n");
-
-	// serialize the mpz DH key to send in over channel
-	int fds[2];
-	if (pipe(fds) == -1) {
-		perror("Error creating pipe");
-		exit(EXIT_FAILURE);
-	}
 
 	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
 	// printf("Serialize returned a length of %zu", dh_pk_server_len);
@@ -162,7 +162,7 @@ int initServerNet(int port)
 	size_t sig_len_client;
 
 	extract_signature(recv_buf, dh_pk_client, &signature_client, &sig_len_client, fds);
-	int verify_ok = verify_signature(rsa_pk_client, dh_pk_client, signature_client, sig_len_client);
+	int verify_ok = verify_signature(rsa_pk_client, dh_pk_client, signature_client, sig_len_client, fds);
 	if (verify_ok == 1) {
 		printf("Server successfully verified client signature!.\n");
 	}
@@ -211,23 +211,23 @@ static int initClientNet(char* hostname, int port)
 
 	printf("Client successfully generated DH key pair.\n");
 
-	// sign DH public key
-    size_t sig_len = EVP_PKEY_size(rsa_sk_client);
-    unsigned char *signature = OPENSSL_malloc(sig_len); 
-	
-	if (generate_signature(rsa_sk_client, dh_pk_client, &signature, &sig_len) != 0) {
-		fprintf(stderr, "Error generating signature\n");
-		return -1;
-	}
-
-	printf("Client successfully generated signature of DH public key.\n");
-
 	// serialize the mpz DH key to send over channel
 	int fds[2];
 	if (pipe(fds) == -1) {
 		perror("Error creating pipe");
 		exit(EXIT_FAILURE);
 	}
+
+	// sign DH public key
+    size_t sig_len = EVP_PKEY_size(rsa_sk_client);
+    unsigned char *signature = OPENSSL_malloc(sig_len); 
+	
+	if (generate_signature(rsa_sk_client, dh_pk_client, &signature, &sig_len, fds) != 0) {
+		fprintf(stderr, "Error generating signature\n");
+		return -1;
+	}
+
+	printf("Client successfully generated signature of DH public key.\n");
 
 	size_t dh_pk_client_len = serialize_mpz(fds[1], dh_pk_client);
 	// printf("Serialize returned a length of %zu for client", dh_pk_client_len);

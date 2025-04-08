@@ -86,7 +86,7 @@ int initServerNet(int port)
     size_t sig_len = EVP_PKEY_size(rsa_sk_server);
     unsigned char *signature = OPENSSL_malloc(sig_len); 
 
-    sign_dh_key_with_rsa(rsa_sk_server, dh_pk_server, 
+    generate_signature(rsa_sk_server, dh_pk_server, 
 		&signature, &sig_len);
 	
 	printf("Server successfully generated signature of DH public key.\n");
@@ -99,6 +99,7 @@ int initServerNet(int port)
 	}
 
 	size_t dh_pk_server_len = serialize_mpz(fds[1], dh_pk_server);
+	// printf("Serialize returned a length of %zu", dh_pk_server_len);
 	close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
@@ -160,13 +161,18 @@ int initServerNet(int port)
 	/* at this point, should be able to send/recv on sockfd */
 
 	// do the actual key exchange
-	char recv_buf[2048];
+	unsigned char recv_buf[2048];
 	if (recv(sockfd, recv_buf, 2048, 0) == -1) {
 		error("ERROR receiving signature\n");
 	}
-	else {
-		printf("\nServer successfully received signature!\n");
-	}
+
+	printf("\nServer successfully received signature!\n");
+
+	mpz_t dh_pk_client;
+	mpz_init(dh_pk_client);
+
+	unsigned char* signature_client = NULL;
+	extract_signature(recv_buf, dh_pk_client, signature_client);
 
 	return 0;
 }
@@ -207,7 +213,7 @@ static int initClientNet(char* hostname, int port)
     size_t sig_len = EVP_PKEY_size(rsa_sk_client);
     unsigned char *signature = OPENSSL_malloc(sig_len); 
 
-    sign_dh_key_with_rsa(rsa_sk_client, dh_pk_client, 
+    generate_signature(rsa_sk_client, dh_pk_client, 
 		&signature, &sig_len);
 	
 	printf("Client successfully generated signature of DH public key.\n");
@@ -220,6 +226,7 @@ static int initClientNet(char* hostname, int port)
 	}
 
 	size_t dh_pk_client_len = serialize_mpz(fds[1], dh_pk_client);
+	// printf("Serialize returned a length of %zu for client", dh_pk_client_len);
 	close(fds[1]); 
 	
 	// write [ key_len, key, sig_len, signature ] to the buf
@@ -274,7 +281,7 @@ static int initClientNet(char* hostname, int port)
 		error("ERROR connecting");
 	/* at this point, should be able to send/recv on sockfd */
 
-	if (send(sockfd, signature, sig_len, 0) == -1) {
+	if (send(sockfd, buf, 2048, 0) == -1) {
 		error("ERROR sending signature");
 	}
 

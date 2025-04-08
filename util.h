@@ -36,8 +36,14 @@ void xwrite(int fd, const void *buf, size_t nBytes);
 
 int generate_rsa_keys(int role);
 
-int sign_dh_key_with_rsa(EVP_PKEY *rsa_private_key, mpz_t dh_key,
+int generate_signature(EVP_PKEY *rsa_private_key, mpz_t dh_key,
 	unsigned char **signature, size_t *sig_len);
+
+// decompose the received DH key + signature into its components
+int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char *signature);
+
+// hash the DH key and verify its origin
+int verify_signature(EVP_PKEY *rsa_public_key, mpz_t dh_key, const unsigned char *signature);
 
 // generates message fingerprint 
 unsigned char* generate_hmac(const unsigned char* key, int key_length,

@@ -18,6 +18,8 @@
 #include <openssl/sha.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <openssl/rand.h>
+
 
 /* when reading long integers, never read more than this many bytes: */
 #define MPZ_MAX_LEN 1024
@@ -233,20 +235,22 @@ int extract_signature(const unsigned char* buf, mpz_t dh_key, unsigned char **si
     return 0;
 }
 
-int bundle_hmac(size_t len, char* message, size_t hmac_len, unsigned char* hmac, unsigned char* hmac_buf) {
+int bundle_hmac(size_t len, unsigned char* message, size_t hmac_len, unsigned char* hmac, unsigned char *iv, unsigned char* hmac_buf) {
     memcpy(hmac_buf, &len, sizeof(size_t));
     memcpy(hmac_buf + sizeof(size_t), message, len);
     memcpy(hmac_buf + sizeof(size_t) + len, &hmac_len, sizeof(size_t));
     memcpy(hmac_buf + 2 * sizeof(size_t) + len, hmac, hmac_len);
+    memcpy(hmac_buf + 2 * sizeof(size_t) + len + hmac_len, iv, 16);
 
     return 0;
 }
 
-int extract_hmac(size_t* len, char* message, size_t* hmac_len, unsigned char* hmac, unsigned char* hmac_buf) {
+int extract_hmac(size_t* len, unsigned char* message, size_t* hmac_len, unsigned char* hmac, unsigned char *iv, unsigned char* hmac_buf) {
     memcpy(len, hmac_buf, sizeof(size_t));
     memcpy(message, hmac_buf + sizeof(size_t), *len);   
     memcpy(hmac_len, hmac_buf + sizeof(size_t) + *len, sizeof(size_t));
     memcpy(hmac, hmac_buf + sizeof(size_t) + *len + sizeof(size_t), *hmac_len);
+    memcpy(iv, hmac_buf + 2 * sizeof(size_t) + *len + *hmac_len, 16);
 
     return 0;
 }
@@ -310,7 +314,7 @@ unsigned char* generate_hmac(const unsigned char* key, int key_length,
 	}
 
 int verify_hmac(const unsigned char* key, int key_length,
-	char* msg, int msg_length,
+	unsigned char* msg, int msg_length,
 	const unsigned char* expected_hmac, int hmac_length) {
 		
 		unsigned int actual_length;
@@ -332,3 +336,49 @@ int verify_hmac(const unsigned char* key, int key_length,
 		}
 		
 	}
+
+int aes_encrypt(const unsigned char *plaintext, int plaintext_len,
+    const unsigned char *key, unsigned char *iv,
+    unsigned char *ciphertext) {
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int len, ciphertext_len;
+
+    if (!ctx) return -1;
+
+    if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
+    return -1;
+
+    if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len))
+        return -1;
+    ciphertext_len = len;
+
+    if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + len, &len))
+        return -1;
+    ciphertext_len += len;
+
+    EVP_CIPHER_CTX_free(ctx);
+    return ciphertext_len;
+}
+
+int aes_decrypt(const unsigned char *ciphertext, int ciphertext_len,
+    const unsigned char *key, unsigned char *iv,
+    unsigned char *plaintext) {
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int len, plaintext_len;
+
+    if (!ctx) return -1;
+
+    if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv))
+    return -1;
+
+    if (1 != EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len))
+    return -1;
+    plaintext_len = len;
+
+    if (1 != EVP_DecryptFinal_ex(ctx, plaintext + len, &len))
+    return -1;
+    plaintext_len += len;
+
+    EVP_CIPHER_CTX_free(ctx);
+    return plaintext_len;
+}

@@ -7,6 +7,7 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/hmac.h>
+#include <openssl/rand.h>
 #include <getopt.h>
 #include "dh.h"
 #include "keys.h"
@@ -30,6 +31,7 @@ static pthread_t trecv;     /* wait for incoming messagess and post to queue */
 void* recvMsg(void*);       /* for trecv */
 static int security_mode = 1;
 static unsigned char dh_shared_key[256] = {0};
+unsigned char ciphertext_buf[512];
 unsigned char hmac_buf[2048];
 
 #define max(a, b)         \
@@ -385,24 +387,30 @@ static void sendMessage(GtkWidget* w /* <-- msg entry widget */, gpointer /* dat
 	/* XXX we should probably do the actual network stuff in a different
 	 * thread and have it call this once the message is actually sent. */
 
-	// security_mode = 0; //prevent displaying handshake/hmac contents on GUI
-	unsigned int hmac_len = 0;
-	unsigned char* hmac = generate_hmac(dh_shared_key, 256, (const unsigned char*)message, (int)len, &hmac_len);
-	bundle_hmac(len, message, (size_t)hmac_len, hmac, hmac_buf);
+	unsigned char iv[16]; // 16 bytes for AES-128-CBC (common IV size)
+	if (RAND_bytes(iv, sizeof(iv)) != 1) {
+		printf("Error reading in random bytes to IV for AES.\n");
+	}
 
-	if (send(sockfd, hmac_buf, 2*sizeof(size_t) + len + hmac_len, 0) == -1) {
+	ssize_t ciphertext_len = aes_encrypt((const unsigned char*)message, (int)len, dh_shared_key, iv, ciphertext_buf);
+	if (ciphertext_len == -1) {
+		printf("Ciphertext encryption fail.\n");
+	}
+	else {
+		printf("Successfully encrypted %zu bytes to ciphertext.\n", ciphertext_len);
+	}
+
+	unsigned int hmac_len = 0;
+	unsigned char* hmac = generate_hmac(dh_shared_key, 256, (const unsigned char*)ciphertext_buf, (int)ciphertext_len, &hmac_len);
+	bundle_hmac(ciphertext_len, ciphertext_buf, (size_t)hmac_len, hmac, iv, hmac_buf);
+
+	if (send(sockfd, hmac_buf, 2*sizeof(size_t) + ciphertext_len + hmac_len + 16, 0) == -1) {
 		printf("Error on sending (message, hmac) pair\n");
 	}
 
-	// if (send(sockfd,hmac_buf,hmac_len,0) == -1) {
-	// 	printf("Error on sending (message, hmac) pair\n");
-	// }
-
-	// security_mode = 1; //allow displaying messages on GUI
-
-	ssize_t nbytes;
-	if ((nbytes = send(sockfd,hmac_buf,2 * sizeof(size_t) + len + hmac_len,0)) == -1)
-		error("send failed");
+	// ssize_t nbytes;
+	// if ((nbytes = send(sockfd,hmac_buf,2 * sizeof(size_t) + ciphertext_len + hmac_len,0)) == -1)
+	// 	error("send failed");
 
 	tsappend(message,NULL,1);
 	free(message);
@@ -545,15 +553,25 @@ void* recvMsg(void*)
 			return 0;
 		}
 
-		size_t len;
+		size_t ciphertext_len;
 		size_t hmac_len;
 		unsigned char hmac[256];
-		extract_hmac(&len, msg, &hmac_len, hmac, hmac_buf);
-		if (verify_hmac(dh_shared_key, 256, msg, (int)len, hmac, (int)hmac_len) != 1) {
+		unsigned char iv[16];
+
+		extract_hmac(&ciphertext_len, ciphertext_buf, &hmac_len, hmac, iv, hmac_buf);
+		if (verify_hmac(dh_shared_key, 256, ciphertext_buf, (int)ciphertext_len, hmac, (int)hmac_len) != 1) {
 			printf("Error on verifying HMAC\n");
 		}
 		else {
 			printf("HMAC successfully verified!\n");
+		}
+
+		ssize_t len = aes_decrypt(ciphertext_buf, ciphertext_len, dh_shared_key, iv, (unsigned char *)msg);
+		if (len == -1) {
+			printf("Error on decrypting AES.\n");
+		}
+		else {
+			printf("Successfully decrypted AES!\n");
 		}
 
 		if (!security_mode) {

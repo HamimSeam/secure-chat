@@ -1,7 +1,7 @@
 # secure-chat
 Contributors: Hamim Seam and Angus Chen
 
-## Libraries Used
+### Libraries Used
 - OpenSSL (for RSA, HMAC, AES)
 - GTK+3 (for GUI)
 - GMP (GNU Multiple Precision arithmetic library)
@@ -12,11 +12,11 @@ Contributors: Hamim Seam and Angus Chen
 
 ### Usage
 - Compilation: `make`
-- Compilation (MacOS): "make -f Makefile.os"
+- Compilation (MacOS): `make -f Makefile.macos`
 - Running: `./chat -l & sleep 1 && ./chat -c localhost`
     Note: This will run both server and client in the same terminal window. For clarity, use two separate terminals.
 
-## Project Structure
+### Project Structure
 - `chat.c`: Main GUI and network loop
 - `util.c/h`: RSA signature and HMAC utilities
 - `dh.c/h`: Diffie-Hellman logic

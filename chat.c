@@ -303,7 +303,7 @@ static int initClientNet(char* hostname, int port)
 
 	int verify_ok = verify_signature(rsa_pk_server, dh_pk_server, signature_server, sig_len_server, fds);
 	if (verify_ok == 1) {
-		printf("Client successfully verified server signature!\n");
+		printf("Client successfully verified server signature!\n\n");
 	}
 	else if (verify_ok == -1) {
 		printf("Error on verification\n");
@@ -394,10 +394,10 @@ static void sendMessage(GtkWidget* w /* <-- msg entry widget */, gpointer /* dat
 
 	ssize_t ciphertext_len = aes_encrypt((const unsigned char*)message, (int)len, dh_shared_key, iv, ciphertext_buf);
 	if (ciphertext_len == -1) {
-		printf("Ciphertext encryption fail.\n");
+		printf("Ciphertext encryption fail via AES.\n");
 	}
 	else {
-		printf("Successfully encrypted %zu bytes to ciphertext.\n", ciphertext_len);
+		printf("\nSuccessfully encrypted via AES!\n");
 	}
 
 	unsigned int hmac_len = 0;
@@ -407,10 +407,9 @@ static void sendMessage(GtkWidget* w /* <-- msg entry widget */, gpointer /* dat
 	if (send(sockfd, hmac_buf, 2*sizeof(size_t) + ciphertext_len + hmac_len + 16, 0) == -1) {
 		printf("Error on sending (message, hmac) pair\n");
 	}
-
-	// ssize_t nbytes;
-	// if ((nbytes = send(sockfd,hmac_buf,2 * sizeof(size_t) + ciphertext_len + hmac_len,0)) == -1)
-	// 	error("send failed");
+	else {
+		printf("HMAC successfully sent!\n");
+	}
 
 	tsappend(message,NULL,1);
 	free(message);
@@ -537,14 +536,6 @@ void* recvMsg(void*)
 	char msg[maxlen+2]; /* might add \n and \0 */
 	ssize_t nbytes;
 	while (1) {
-		// if ((nbytes = recv(sockfd,msg,maxlen,0)) == -1)
-		// 	error("recv failed");
-		// if (nbytes == 0) {
-		// 	/* XXX maybe show in a status message that the other
-		// 	 * side has disconnected. */
-		// 	return 0;
-		// }
-
 		if ((nbytes = recv(sockfd,hmac_buf,2048,0)) == -1)
 			error("recv failed");
 		if (nbytes == 0) {
@@ -568,10 +559,10 @@ void* recvMsg(void*)
 
 		ssize_t len = aes_decrypt(ciphertext_buf, ciphertext_len, dh_shared_key, iv, (unsigned char *)msg);
 		if (len == -1) {
-			printf("Error on decrypting AES.\n");
+			printf("Error on decrypting via AES.\n");
 		}
 		else {
-			printf("Successfully decrypted AES!\n");
+			printf("Successfully decrypted via AES!\n\n");
 		}
 
 		if (!security_mode) {

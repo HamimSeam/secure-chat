@@ -36,6 +36,12 @@ chat : $(IMPL) dh.o keys.o util.o
 dh-example : dh-example.o dh.o keys.o util.o
 	$(LD) $(LDFLAGS) -o $@ $^ $(LDADD)
 
+rsa: generate_rsa
+	./generate_rsa
+
+generate_rsa: generate_rsa.c util.c
+	gcc -o generate_rsa generate_rsa.c util.c -lgmp -lcrypto -lssl
+
 %.o : %.cpp $(HEADERS)
 	$(CXX) $(DEFS) $(INCLUDE) $(CXXFLAGS) -c $< -o $@
 

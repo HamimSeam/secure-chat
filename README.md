@@ -11,6 +11,9 @@ Contributors: Hamim Seam and Angus Chen
 - Linux/WSL installation: sudo apt install libssl-dev libgtk-3-dev libgmp-dev
 
 ### Usage
+- Key Generation (if keys are not present)
+	- Create `keys/server` and `keys/client` directories in project root
+	- Generation: `make rsa`
 - Compilation: `make`
 - Compilation (MacOS): `make -f Makefile.macos`
 - Running: `./chat -l & sleep 1 && ./chat -c localhost`
